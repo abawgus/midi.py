@@ -1299,7 +1299,7 @@ class SysExEvent(Event):
     """
 
     @classmethod
-    def _parse(cls, source):
+    def _parse(cls, source, status):
         """Delegate parser method. Called by Event.parse."""
         raise MIDIError('System exclusive events are unsupported.')
 
