@@ -1094,6 +1094,26 @@ class CuePoint(TextMetaEvent):
     """Marks the start of a new sound or action."""
 
 
+class PortNumber(TextMetaEvent):
+    """Obsolute specification of MIDI port or cable number."""
+
+
+class Title(TextMetaEvent):
+    """Text of title."""
+
+
+class Subtitle(TextMetaEvent):
+    """Text of subtitle."""
+
+
+class Lyricist(TextMetaEvent):
+    """Text identifying lyricist."""
+
+
+class Composer(TextMetaEvent):
+    """Text Identifying Composer."""
+
+
 class ChannelPrefix(MetaEvent):
     """
     Indicate that the following meta events affect a specific channel.
@@ -1724,7 +1744,12 @@ MetaEvent._events = {
     0x54: SMPTEOffset,
     0x58: SetTimeSignature,
     0x59: SetKeySignature,
-    0x7f: ProprietaryEvent}
+    0x7f: ProprietaryEvent,
+    0x21: PortNumber,
+    0x08: Title,
+    0x09: Subtitle,
+    0x0a: Composer,
+    0x0c: Lyricist}
 MetaEvent._types = {value: key for key, value in MetaEvent._events.items()}
 
 Program._descs = {
