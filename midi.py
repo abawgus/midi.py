@@ -722,7 +722,7 @@ class Event:
         self._time.event = self
 
     @staticmethod
-    def parse(source):
+    def parse(source,prev):
         """
         Create a new Event object of the appropriate type from a bytes.
 
@@ -735,13 +735,17 @@ class Event:
         """
         if not isinstance(source, collections.Iterator):
             source = iter(source)
+
         status = next(source)
         if status == MetaEvent.status:
             event = MetaEvent._parse(source)
         elif status == 0xf7 or status == 0xf0:
             event = SysExEvent._parse(source, status)
+        elif status < 0x80:
+            event = prev
         else:
             event = ChannelEvent._parse(source, status)
+        print("Event:",event)
         return event
 
     def __str__(self):
@@ -963,13 +967,12 @@ class PitchBend(ChannelEvent):
         return cls(value)
 
     def _parameters(self):
-        value = round((self.vale + 1) * 0x2000)
+        value = round((self.value + 1) * 0x2000)
         return (value & 0x7f, (value >> 7) & 0x7f)
 
     def __repr__(self):
         return '{type}({value})'.format(
             type=type(self).__name__, value=self.value)
-
 
 class MetaEvent(Event):
     """
@@ -1066,8 +1069,28 @@ class SequenceNumber(MetaEvent):
         return self.number.to_bytes(2, 'big')
 
 
+class PortNumber(TextMetaEvent):
+    """Obsolute specification of MIDI port or cable number."""
+
+
 class Text(TextMetaEvent):
     """Arbitrary text for comments or description."""
+
+
+class Title(TextMetaEvent):
+    """Text of title."""
+
+
+class Subtitle(TextMetaEvent):
+    """Text of subtitle."""
+
+
+class Lyricist(TextMetaEvent):
+    """Text identifying lyricist."""
+
+
+class Composer(TextMetaEvent):
+    """Text Identifying Composer."""
 
 
 class Copyright(TextMetaEvent):
@@ -1092,26 +1115,6 @@ class Marker(TextMetaEvent):
 
 class CuePoint(TextMetaEvent):
     """Marks the start of a new sound or action."""
-
-
-class PortNumber(TextMetaEvent):
-    """Obsolute specification of MIDI port or cable number."""
-
-
-class Title(TextMetaEvent):
-    """Text of title."""
-
-
-class Subtitle(TextMetaEvent):
-    """Text of subtitle."""
-
-
-class Lyricist(TextMetaEvent):
-    """Text identifying lyricist."""
-
-
-class Composer(TextMetaEvent):
-    """Text Identifying Composer."""
 
 
 class ChannelPrefix(MetaEvent):
@@ -1139,6 +1142,9 @@ class ChannelPrefix(MetaEvent):
     def _bytes(self):
         """Delegate bytes method, called by MetaEvent.__bytes__."""
         return self.channel.to_bytes(1, 'big')
+
+
+#class RunningStatus(ChannelEvent):
 
 
 class EndTrack(MetaEvent):
@@ -1298,10 +1304,20 @@ class SysExEvent(Event):
     MIDIError.
     """
 
+    def __init__(self, source, **keywords):
+        super().__init__(**keywords)
+
+
     @classmethod
-    def _parse(cls, source, status):
+    def _parse(cls, source=None, status=None):
         """Delegate parser method. Called by Event.parse."""
-        raise MIDIError('System exclusive events are unsupported.')
+
+        if cls == SysExEvent:
+            length = _var_int_parse(source)
+            data = bytearray()
+            for i in range(length):
+                data.append(next(source))
+            return cls(data)
 
 
 class Sequence(list):
@@ -1344,6 +1360,7 @@ class Sequence(list):
         tracks = int.from_bytes(chunk[2:4], 'big')
         sequence.division = TimeDivision(chunk[4:6])
         track = 0
+        prev = None
         for index in range(tracks):
             chunk = Chunk.parse(source)
             if chunk.id == 'MTrk':
@@ -1351,8 +1368,11 @@ class Sequence(list):
                 cumulative = 0
                 while True:
                     delta = _var_int_parse(data)
+
                     try:
-                        event = Event.parse(data)
+                        print("Data:", data)
+                        event = Event.parse(data,prev)
+                        prev = event
                     except StopIteration:
                         raise MIDIError(
                             'Incomplete track. End Track event not found.')
@@ -1716,6 +1736,8 @@ class MIDIError(Exception):
     MIDIError is a thin wrapper for Exception. A MIDIError raised by the midi
     module will contain one argument: a string explaining what went wrong.
     """
+
+
 
 
 ChannelEvent._events = {
