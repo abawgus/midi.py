@@ -722,7 +722,7 @@ class Event:
         self._time.event = self
 
     @staticmethod
-    def parse(source,prev):
+    def parse(source,pstatus):
         """
         Create a new Event object of the appropriate type from a bytes.
 
@@ -739,14 +739,17 @@ class Event:
         status = next(source)
         if status == MetaEvent.status:
             event = MetaEvent._parse(source)
+            pstatus = status
         elif status == 0xf7 or status == 0xf0:
             event = SysExEvent._parse(source, status)
+            pstatus = status
         elif status < 0x80:
-            event = prev
+            event = ChannelEvent._parse(source,pstatus)
         else:
             event = ChannelEvent._parse(source, status)
+            pstatus = status
         print("Event:",event)
-        return event
+        return event, pstatus
 
     def __str__(self):
         return _name_to_desc(type(self).__name__)
@@ -1360,7 +1363,7 @@ class Sequence(list):
         tracks = int.from_bytes(chunk[2:4], 'big')
         sequence.division = TimeDivision(chunk[4:6])
         track = 0
-        prev = None
+        pstatus = None
         for index in range(tracks):
             chunk = Chunk.parse(source)
             if chunk.id == 'MTrk':
@@ -1371,8 +1374,7 @@ class Sequence(list):
 
                     try:
                         print("Data:", data)
-                        event = Event.parse(data,prev)
-                        prev = event
+                        event, pstatus = Event.parse(data,pstatus)
                     except StopIteration:
                         raise MIDIError(
                             'Incomplete track. End Track event not found.')
