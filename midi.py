@@ -31,6 +31,8 @@ flags. A setter event creates a flag object and subsequent event objects
 contain references to the flag object.
 """
 
+import time
+
 import io
 import binascii
 import collections
@@ -722,7 +724,8 @@ class Event:
         self._time.event = self
 
     @staticmethod
-    def parse(source,pstatus):
+    def parse(source, runningStatus=None):
+
         """
         Create a new Event object of the appropriate type from a bytes.
 
@@ -739,17 +742,17 @@ class Event:
         status = next(source)
         if status == MetaEvent.status:
             event = MetaEvent._parse(source)
-            pstatus = status
+            runningStatus = status
         elif status == 0xf7 or status == 0xf0:
             event = SysExEvent._parse(source, status)
-            pstatus = status
-        elif status < 0x80:
-            event = ChannelEvent._parse(source,pstatus)
+            runningStatus = status
+        elif (status & 0x80) == 0:
+            event = ChannelEvent._parse(source,runningStatus,status)
         else:
             event = ChannelEvent._parse(source, status)
-            pstatus = status
-        print("Event:",event)
-        return event, pstatus
+            runningStatus = status  
+
+        return event, runningStatus
 
     def __str__(self):
         return _name_to_desc(type(self).__name__)
@@ -776,7 +779,7 @@ class ChannelEvent(Event):
         super().__init__(**keywords)
 
     @classmethod
-    def _parse(cls, source=None, status=None):
+    def _parse(cls, source=None, status=None, byte=None):
         """Delegate parser method. Called by Event.parse."""
         if cls == ChannelEvent:
             channel = status & 0x0f
@@ -785,11 +788,14 @@ class ChannelEvent(Event):
                 raise MIDIError(
                     'Encountered an unknown event: {status:X}.'.format(
                     status=status))
-            event = ChannelEvent._events[type]._parse(source)
+            event = ChannelEvent._events[type]._parse(source, byte=byte)
             event.channel = channel
             return event
         else:
-            return cls(next(source), next(source))
+            if byte is None:
+                return cls(next(source), next(source))
+            else:
+                return cls(byte, next(source))
 
     @property
     def type(self):
@@ -917,9 +923,12 @@ class ProgramChange(ChannelEvent):
             self.program = Program(program)
 
     @classmethod
-    def _parse(cls, source):
+    def _parse(cls, source, byte):
         """Delegate parser method. Called by ChannelEvent._parse."""
-        return cls(next(source))
+        if byte is None:
+            return cls(next(source))
+        else:
+            return cls(byte)
 
     def _parameters(self):
         return (self.program.number - 1,)
@@ -942,9 +951,12 @@ class ChannelAftertouch(ChannelEvent):
         self.amount = amount
 
     @classmethod
-    def _parse(cls, source):
+    def _parse(cls, source, byte):
         """Delegate parser method. Called by ChannelEvent._parse."""
-        return cls(next(source))
+        if byte is None:
+            return cls(next(source))
+        else:
+            return cls(byte)
 
     def _parameters(self):
         return (self.amount,)
@@ -963,9 +975,12 @@ class PitchBend(ChannelEvent):
         self.value = value
 
     @classmethod
-    def _parse(cls, source):
+    def _parse(cls, source, byte):
         """Delegate parser method. Called by ChannelEvent._parse."""
-        value = (next(source) & 0x7f) | ((next(source) & 0x7f) << 7)
+        if byte is None:
+            value = (next(source) & 0x7f) | ((next(source) & 0x7f) << 7)
+        else:
+            value = (byte & 0x7f) | ((next(source) & 0x7f) << 7)
         value = (value / 0x2000) - 1
         return cls(value)
 
@@ -1309,6 +1324,7 @@ class SysExEvent(Event):
 
     def __init__(self, source, **keywords):
         super().__init__(**keywords)
+        self.data = bytes(source)
 
 
     @classmethod
@@ -1321,6 +1337,13 @@ class SysExEvent(Event):
             for i in range(length):
                 data.append(next(source))
             return cls(data)
+
+
+    def __bytes__(self):
+        array = bytearray()
+        array.extend(_var_int_bytes(len(self.data)))
+        array.extend(self.data)
+        return bytes(array)
 
 
 class Sequence(list):
@@ -1358,12 +1381,12 @@ class Sequence(list):
             source = iter(source)
 
         sequence = Sequence()
-        chunk = Chunk.parse(source, id='MThd')
+        chunk = Chunk.parse(source, id='MThd') #chunk = hex of header chunk
         sequence.format = int.from_bytes(chunk[0:2], 'big')
-        tracks = int.from_bytes(chunk[2:4], 'big')
+        tracks = int.from_bytes(chunk[2:4], 'big') #get number of tracks in header chunk
         sequence.division = TimeDivision(chunk[4:6])
         track = 0
-        pstatus = None
+        runningStatus = None
         for index in range(tracks):
             chunk = Chunk.parse(source)
             if chunk.id == 'MTrk':
@@ -1371,10 +1394,8 @@ class Sequence(list):
                 cumulative = 0
                 while True:
                     delta = _var_int_parse(data)
-
                     try:
-                        print("Data:", data)
-                        event, pstatus = Event.parse(data,pstatus)
+                        event, runningStatus = Event.parse(data, runningStatus)
                     except StopIteration:
                         raise MIDIError(
                             'Incomplete track. End Track event not found.')
@@ -1589,6 +1610,8 @@ class Sequence(list):
             chunk = Chunk(id='MTrk')
             cumulative = 0
             for event in events:
+                if isinstance(event, SysExEvent):
+                    continue
                 delta = event.time.cumulative - cumulative
                 chunk.extend(_var_int_bytes(delta))
                 chunk.extend(bytes(event))
